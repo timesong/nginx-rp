@@ -1,0 +1,13 @@
+#!/bin/bash
+echo "Loading..."
+touch $1proxy.conf
+
+keyword=`printenv NP_SVC_KWD`
+
+if [ -n "$keyword" ]
+then
+	/bin/rpu $1 &
+fi
+
+echo "Starting..."
+nginx -g "daemon off;"

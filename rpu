@@ -1,0 +1,55 @@
+#!/bin/bash
+
+echo "Create proxy.conf."
+
+tmpl='\t\tlocation /<svc> {\n\t\t\tproxy_pass http://<svc>:<port>/;\n\t\t\tproxy_http_version 1.1;\n\t\t\tproxy_set_header Upgrade $http_upgrade;\n\t\t\tproxy_set_header Connection $connection_upgrade;\n\t\t}'
+
+keyword=`printenv NP_SVC_KWD`
+addrs=`printenv NP_SVC_ADDRS`
+old_svcs=""
+
+while :
+do
+	for addr in ${addrs//,/ }
+	do
+		data=`curl --silent http://$addr/services`
+		svcs=""
+		for s in `echo $data|jq -r -C '.[] | .Spec | select(.Name|test("'"${keyword}"'")) | .Name' | sort`
+		do
+			ping -q -c1 $s > /dev/null
+			if [ $? -eq 0 ]
+			then
+				svcs="$svcs $s"
+			fi
+		done
+
+		if [ -z "$svcs" ]
+		then
+			echo "Waiting for next feching..."
+			sleep 10s
+			continue
+		fi
+		if [ "$old_svcs" != "$svcs" ]
+		then
+			echo "" > $1proxy.conf
+			
+			for item in `echo $data | jq -r -C '.[] | .["Spec"] | select(.Name|test("'"${keyword}"'")) | [.Name, {"p": [.EndpointSpec.Ports[].TargetPort] | sort}]|[.[0], .[1].p[0]|tostring]| join(",")'`
+			do
+				# echo $item
+				v1=`echo $item|cut -d , -f 1`
+				v2=`echo $item|cut -d , -f 2`
+				new=${tmpl//<svc>/${v1}}
+				new=${new//<port>/${v2}}
+				echo -e $new
+				echo -e $new >> $1proxy.conf
+			done
+
+			echo "Reloading..."
+			nginx -s reload
+			old_svcs=$svcs
+			break
+		fi
+	done
+	echo "Waiting..."
+	sleep 10s
+done
